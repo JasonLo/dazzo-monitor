@@ -1,14 +1,72 @@
 import asyncio
 import logging
 import os
+import time
+from collections import deque
 
+import numpy as np
 from bleak import BleakClient, BleakScanner
 from bleak.backends.characteristic import BleakGATTCharacteristic
 from dotenv import load_dotenv
 
+from .classifier import ActivityClassifier
+
 load_dotenv()
 # Nordic UART Service (NUS)
 UART_RX_CHAR_UUID = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
+
+
+class DataProcessor:
+    """Handles parsing incoming data, buffering samples, and periodic activity classification."""
+
+    def __init__(self, report_period_s: float = 5.0) -> None:
+        self.classifier = ActivityClassifier()
+        self.samples = deque(maxlen=1000)  # Data buffer
+        self.last_report_time = time.time()
+        self.report_interval = report_period_s
+        self.latest_voltage: float | None = None
+
+    def process_line(self, line: str) -> None:
+        """Parse a line of data and add to samples buffer."""
+        try:
+            parts = line.strip().split(",")
+            if len(parts) == 4:
+                voltage = float(parts[0])
+                x, y, z = float(parts[1]), float(parts[2]), float(parts[3])
+                self.samples.append((x, y, z))
+                self.latest_voltage = voltage
+                logging.debug(
+                    f"Voltage: {voltage:.2f}V, Accel: ({x:.2f}, {y:.2f}, {z:.2f})"
+                )
+            else:
+                logging.warning(f"Unexpected data format: {line.strip()}")
+        except ValueError as e:
+            logging.error(f"Failed to parse line '{line.strip()}': {e}")
+
+    def report_activity(self) -> None:
+        """Classify activity from buffered samples and log the result."""
+        if not self.samples:
+            logging.info("No samples available for classification")
+            return
+
+        # Convert samples to numpy array
+        data = np.array(list(self.samples))
+        activity = self.classifier.classify(data)
+        logging.info(f"Activity classification: {activity}")
+        # Clear samples after classification
+        self.samples.clear()
+
+    def report_voltage(self, voltage: float) -> None:
+        """Log the latest voltage reading."""
+        logging.info(f"Battery voltage: {voltage:.2f}V")
+
+    async def periodic_report(self) -> None:
+        """Run periodic activity and voltage reporting."""
+        while True:
+            await asyncio.sleep(self.report_interval)
+            self.report_activity()
+            if self.latest_voltage is not None:
+                self.report_voltage(self.latest_voltage)
 
 
 async def find_by_name(target_name: str) -> str | None:
@@ -40,7 +98,9 @@ async def find_by_name(target_name: str) -> str | None:
     return None
 
 
-async def _connect_and_stream(addr: str, rx_buffer: bytearray) -> None:
+async def _connect_and_stream(
+    addr: str, rx_buffer: bytearray, processor: DataProcessor
+) -> None:
     """Connect to the given address, stream notifications until disconnected.
 
     Returns when the device disconnects or an error occurs.
@@ -65,7 +125,8 @@ async def _connect_and_stream(addr: str, rx_buffer: bytearray) -> None:
             # remove the processed line + delimiter
             del rx_buffer[: idx + 1]
             try:
-                logging.info(line.decode("utf-8", errors="replace"))
+                line_str = line.decode("utf-8", errors="replace")
+                processor.process_line(line_str)
             except Exception:
                 logging.error(repr(line))
 
@@ -81,6 +142,9 @@ async def main() -> None:
     load_dotenv()
     target_name: str = os.getenv("QT_PY_BLUETOOTH_NAME", "CIRCUITPY")
 
+    # Initialize data processor
+    processor = DataProcessor()
+
     # Keep buffer across reconnects so we don't lose partial lines
     rx_buffer = bytearray()
 
@@ -91,34 +155,45 @@ async def main() -> None:
     backoff: float = 1.0
     max_backoff: float = float(os.getenv("RESUME_MAX_BACKOFF_SECS", "30"))
 
-    while True:
-        addr: str | None = last_addr
-        # If we don't have a known address, scan by name
-        if not addr:
-            addr = await find_by_name(target_name)
+    # Start periodic reporting task
+    report_task = asyncio.create_task(processor.periodic_report())
+
+    try:
+        while True:
+            addr: str | None = last_addr
+            # If we don't have a known address, scan by name
             if not addr:
-                logging.warning(
-                    f"No device matched '{target_name}'. Retrying in {backoff:.0f}s..."
-                )
+                addr = await find_by_name(target_name)
+                if not addr:
+                    logging.warning(
+                        f"No device matched '{target_name}'. Retrying in {backoff:.0f}s..."
+                    )
+                    await asyncio.sleep(backoff)
+                    backoff = min(backoff * 2, max_backoff)
+                    continue
+
+            try:
+                await _connect_and_stream(addr, rx_buffer, processor)
+                # Successful session ended due to disconnect; remember address and reset backoff
+                last_addr = addr
+                backoff = 1.0
+                # Small pause before attempting to reconnect to avoid thrashing
+                await asyncio.sleep(1.0)
+                logging.info("Attempting to resume connection...")
+            except Exception as e:
+                logging.error(f"Connection error: {e}")
+                # Force a rescan next iteration
+                last_addr = None
+                logging.info(f"Retrying in {backoff:.0f}s...")
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, max_backoff)
-                continue
-
+    finally:
+        # Cancel the reporting task on exit
+        report_task.cancel()
         try:
-            await _connect_and_stream(addr, rx_buffer)
-            # Successful session ended due to disconnect; remember address and reset backoff
-            last_addr = addr
-            backoff = 1.0
-            # Small pause before attempting to reconnect to avoid thrashing
-            await asyncio.sleep(1.0)
-            logging.info("Attempting to resume connection...")
-        except Exception as e:
-            logging.error(f"Connection error: {e}")
-            # Force a rescan next iteration
-            last_addr = None
-            logging.info(f"Retrying in {backoff:.0f}s...")
-            await asyncio.sleep(backoff)
-            backoff = min(backoff * 2, max_backoff)
+            await report_task
+        except asyncio.CancelledError:
+            pass
 
 
 if __name__ == "__main__":
