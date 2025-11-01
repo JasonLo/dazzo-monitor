@@ -44,6 +44,6 @@ while True:
     x, y, z = (acc[0] or 0, acc[1] or 0, acc[2] or 0)
 
     # Send data
-    line = f"{v:.4f},{x:.4f},{y:.4f},{z:.4f}\n"
+    line = f"{v:.2f},{x:.2f},{y:.2f},{z:.2f}\n"
     uart.write(line.encode("utf-8"))
     time.sleep(1)
