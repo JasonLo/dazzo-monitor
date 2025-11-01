@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 from typing import Any, Optional
 
@@ -14,26 +15,26 @@ async def find_by_name(target_name: str) -> Optional[str]:
     Matching rule: prefer exact name match (case-sensitive),
     otherwise fall back to substring match (case-insensitive).
     """
-    print(f"Scanning for BLE devices (5s)... looking for '{target_name}'")
+    logging.info(f"Scanning for BLE devices (5s)... looking for '{target_name}'")
     devices = await BleakScanner.discover(timeout=5.0)
     if not devices:
-        print("No BLE devices found.")
+        logging.warning("No BLE devices found.")
         return None
 
     # Try exact match first
     for d in devices:
         if (d.name or "") == target_name:
-            print(f"Found exact match: {d.name} [{d.address}]")
+            logging.info(f"Found exact match: {d.name} [{d.address}]")
             return d.address
 
     # Fallback: substring case-insensitive
     t = target_name.lower()
     for d in devices:
         if t in (d.name or "").lower():
-            print(f"Found partial match: {d.name} [{d.address}]")
+            logging.info(f"Found partial match: {d.name} [{d.address}]")
             return d.address
 
-    print(f"No device matched name '{target_name}'.")
+    logging.info(f"No device matched name '{target_name}'.")
     return None
 
 
@@ -41,13 +42,13 @@ async def main() -> None:
     target_name = os.getenv("QT_PY_BLUETOOTH_NAME", "CIRCUITPY")
     addr = await find_by_name(target_name)
     if not addr:
-        print("Aborting.")
+        logging.error("Aborting.")
         return
 
     disconnected: asyncio.Event = asyncio.Event()
 
     def on_disconnect(_: BleakClient) -> None:
-        print("Disconnected.")
+        logging.info("Disconnected.")
         disconnected.set()
 
     # Buffer to reassemble newline-terminated messages across BLE fragments
@@ -66,22 +67,28 @@ async def main() -> None:
             # remove the processed line + delimiter
             del rx_buffer[: idx + 1]
             try:
-                print(line.decode("utf-8", errors="replace"))
+                logging.info(line.decode("utf-8", errors="replace"))
             except Exception:
-                print(repr(line))
+                logging.error(repr(line))
 
-    print(f"Connecting to {addr} ...")
+    logging.info(f"Connecting to {addr} ...")
     try:
         async with BleakClient(addr, disconnected_callback=on_disconnect) as client:
-            print("Connected. Subscribing to notifications...")
+            logging.info("Connected. Subscribing to notifications...")
             await client.start_notify(UART_RX_CHAR_UUID, handle_received_bytes)
-            print("Receiving data. Press Ctrl+C to stop.")
+            logging.info("Receiving data. Press Ctrl+C to stop.")
             await disconnected.wait()
     except Exception as e:
-        print(f"Connection error: {e}")
+        logging.error(f"Connection error: {e}")
 
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[logging.FileHandler("log.txt"), logging.StreamHandler()],
+    )
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
