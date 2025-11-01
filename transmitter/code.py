@@ -50,6 +50,8 @@ bno055.accel_mode = adafruit_bno055.ACCEL_LOWPOWER1_MODE
 bno055.accel_bandwidth = adafruit_bno055.ACCEL_15_63HZ
 battery_voltage = analogio.AnalogIn(board.A0)
 
+# Voltage Multiplier, calibrated with other board with VOLTAGE_MONITOR
+ESTIMATE_VOLTAGE_MULTIPLIER = 2.85
 while True:
     if not ble.connected:
         if not ble.advertising:
@@ -57,13 +59,9 @@ while True:
         time.sleep(0.2)
         continue
 
-    voltage = (battery_voltage.value * 3.3 / 65535) * 2
+    voltage = (battery_voltage.value * 3.3 / 65535) * ESTIMATE_VOLTAGE_MULTIPLIER
     acceleration = _coalesce_tuple(bno055.acceleration, 3)
     sensors = (voltage,) + acceleration
     line = ",".join([_fmt(v) for v in sensors]) + "\n"
     uart.write(line.encode("utf-8"))
     time.sleep(1)
-
-    if voltage < 3.2:  # protective shutdown
-        print("Low battery — sleeping...")
-        microcontroller.deepsleep()
