@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import random
 import signal
@@ -103,7 +104,7 @@ def _make_rx_handler():
             return
 
         if result:
-            print(json.dumps(result, separators=(",", ":")))
+            logging.info(json.dumps(result, separators=(",", ":")))
             buffer = ""  # reset after a successful parse
 
     return handle_rx
@@ -185,6 +186,11 @@ async def run_monitor(shutdown: asyncio.Event):
 
 
 async def _amain():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     shutdown = asyncio.Event()
 
     # Graceful Ctrl+C handling
