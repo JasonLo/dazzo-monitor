@@ -3,6 +3,7 @@
         "ACCONLY",
         "analogio",
         "LOWPOWER",
+        "microcontroller",
         "PSRAM",
         "UART"
     ]
