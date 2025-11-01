@@ -63,3 +63,7 @@ while True:
     line = ",".join([_fmt(v) for v in sensors]) + "\n"
     uart.write(line.encode("utf-8"))
     time.sleep(1)
+
+    if voltage < 3.2:  # protective shutdown
+        print("Low battery — sleeping...")
+        microcontroller.deepsleep()
