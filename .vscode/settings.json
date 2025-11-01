@@ -6,6 +6,7 @@
         "LOWPOWER",
         "microcontroller",
         "PSRAM",
+        "rescan",
         "UART"
     ]
 }
