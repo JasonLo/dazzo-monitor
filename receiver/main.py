@@ -10,6 +10,7 @@ from bleak.backends.characteristic import BleakGATTCharacteristic
 from dotenv import load_dotenv
 
 from .classifier import ActivityClassifier, SensorMode
+from .push import push_data
 
 load_dotenv()
 
@@ -28,11 +29,13 @@ class DataProcessor:
         self,
         classifier: ActivityClassifier,
         report_period_s: float = REPORT_PERIOD_SECS,
+        push_to_io: bool = False,
     ) -> None:
         if report_period_s <= 0:
             raise ValueError("report_period_s must be positive")
         self.classifier = classifier
         self.report_period_s = report_period_s
+        self.push_to_io = push_to_io
 
         self.samples = deque(maxlen=1000)  # Data buffer
         self.last_report_time = time.time()
@@ -40,18 +43,13 @@ class DataProcessor:
     def __repr__(self) -> str:
         return f"DataProcessor(report_period_s={self.report_period_s}, samples_count={len(self.samples)})"
 
-    def parse(self, line: str) -> dict[str, float] | None:
+    def process(self, line: str) -> None:
         """Parse a line of data and add to samples buffer."""
         try:
             parts = line.strip().split(",")
             if len(parts) == 3:
                 x, y, z = float(parts[0]), float(parts[1]), float(parts[2])
                 self.samples.append((x, y, z))
-                return {
-                    "x": x,
-                    "y": y,
-                    "z": z,
-                }
             else:
                 logging.warning(f"Unexpected data format: {line.strip()}")
         except ValueError as e:
@@ -67,6 +65,11 @@ class DataProcessor:
         data = np.array(list(self.samples))
         activity = self.classifier.classify(data)
         logging.info(f"Activity classification: {activity}")
+        if self.push_to_io:
+            try:
+                push_data("dazzo", activity)
+            except Exception as e:
+                logging.error(f"Failed to push activity to Adafruit IO: {e}")
         # Clear samples after classification
         self.samples.clear()
 
@@ -89,8 +92,10 @@ class BLEManager:
             raise ValueError("transmitter_name cannot be empty")
         if max_backoff <= 0:
             raise ValueError("max_backoff must be positive")
+
         self.transmitter_name = transmitter_name
         self.max_backoff = max_backoff
+
         self.rx_buffer = bytearray()
         self.last_addr: str | None = None
 
@@ -153,11 +158,7 @@ class BLEManager:
                     continue
 
                 try:
-                    parsed = processor.parse(line_str)
-                    if parsed:
-                        logging.debug(
-                            f"Accel: ({parsed.get('x'):.2f}, {parsed.get('y'):.2f}, {parsed.get('z'):.2f})"
-                        )
+                    processor.process(line_str)
                 except Exception:
                     logging.error(f"Failed to process line: {repr(line_str)}")
 
@@ -198,11 +199,11 @@ class BLEManager:
                 backoff = min(backoff * 2, self.max_backoff)
 
 
-async def run_receiver(sensor_mode: SensorMode) -> None:
+async def run_receiver(sensor_mode: SensorMode, push_to_io: bool) -> None:
     """Main receiver loop: connect, receive data, classify activity, and handle re-connections."""
 
     classifier = ActivityClassifier(sensor_mode=sensor_mode)
-    processor = DataProcessor(classifier=classifier)
+    processor = DataProcessor(classifier=classifier, push_to_io=push_to_io)
     ble_manager = BLEManager(transmitter_name=TRANSMITTER_NAME)
 
     report_task = asyncio.create_task(processor.periodic_report())
@@ -218,7 +219,7 @@ async def run_receiver(sensor_mode: SensorMode) -> None:
 
 
 async def main() -> None:
-    await run_receiver(sensor_mode=SENSOR_MODE)
+    await run_receiver(sensor_mode=SENSOR_MODE, push_to_io=True)
 
 
 if __name__ == "__main__":

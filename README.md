@@ -21,7 +21,7 @@ Ultra-lightweight (10g) BLE movement tracker for indoor pet monitoring.
 
 ## Receiver
 
-Python service that receives BLE telemetry data via Nordic UART.
+Python service that receives BLE telemetry data via Nordic UART. No power or compute limit.
 
 ### Usage
 
