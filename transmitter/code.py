@@ -2,7 +2,6 @@ import gc
 import time
 
 import adafruit_bno055
-import alarm
 import board
 import microcontroller
 from adafruit_ble import BLERadio
@@ -28,7 +27,7 @@ microcontroller.cpu.frequency = 120_000_000
 
 # BLE Advertising
 advertisement = ProvideServicesAdvertisement(uart)
-print("Ready")
+print("Ready to connect!")
 
 # Main loop
 while True:
@@ -46,18 +45,5 @@ while True:
     # Read sensors
     acc = bno055.linear_acceleration or (0, 0, 0)
     x, y, z = (acc[0] or 0, acc[1] or 0, acc[2] or 0)
-
-    # Calculate linear acceleration magnitude
-    magnitude = (x**2 + y**2 + z**2) ** 0.5
-
-    # Only transmit data if magnitude exceeds threshold
-    if magnitude >= MIN_TRANSMISSION_THRESHOLD:
-        print("Active mode")
-        uart.write(f"{x:.2f},{y:.2f},{z:.2f}\n".encode("utf-8"))
-        t = ACTIVE_SLEEP_DURATION_SECS
-    else:
-        print("Passive mode")
-        t = PASSIVE_SLEEP_DURATION_SECS
-
-    time_alarm = alarm.time.TimeAlarm(monotonic_time=time.monotonic() + t)
-    alarm.light_sleep_until_alarms(time_alarm)
+    uart.write(f"{x:.2f},{y:.2f},{z:.2f}\n".encode("utf-8"))
+    time.sleep(1.0)

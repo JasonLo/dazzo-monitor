@@ -65,7 +65,9 @@ class DataProcessor:
         data = np.array(list(self.samples))
         activity = self.classifier.classify(data)
         logging.info(f"Activity classification: {activity}")
-        if self.push_to_io:
+        if (
+            self.push_to_io and activity.get("activity", "") != "resting"
+        ):  # Only push non-resting activities
             try:
                 push_data("dazzo", activity)
             except Exception as e:
