@@ -34,8 +34,11 @@ while True:
     # Advertise until connected
     if not ble.connected:
         if not ble.advertising:
-            gc.collect()  # Clean up memory, works around some memory leak issues
-            ble.start_advertising(advertisement)
+            try:
+                ble.start_advertising(advertisement)
+            except Exception as e:
+                print(f"Failed to start advertising: {e}")
+                gc.collect()
         time.sleep(0.5)
         continue
 
