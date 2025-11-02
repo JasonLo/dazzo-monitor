@@ -14,6 +14,7 @@ from .classifier import ActivityClassifier
 load_dotenv()
 # Nordic UART Service (NUS)
 UART_RX_CHAR_UUID = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
+TRANSMITTER_SENSOR_MODE = "linear"  # "accelerometer" or "linear"
 
 
 class DataProcessor:
@@ -51,7 +52,7 @@ class DataProcessor:
 
         # Convert samples to numpy array
         data = np.array(list(self.samples))
-        activity = self.classifier.classify(data)
+        activity = self.classifier.classify(data, input_type=TRANSMITTER_SENSOR_MODE)
         logging.info(f"Activity classification: {activity}")
         # Clear samples after classification
         self.samples.clear()

@@ -35,12 +35,6 @@ class ActivityClassifier:
             str: one of 'resting', 'active', or 'highly active' with the
                  mean dynamic acceleration reported in g units.
 
-        Notes:
-            - Simply using ||a|| - g is not a valid gravity removal in general
-              (it underestimates lateral motion by ~A^2/(2g)). Instead, we
-              estimate and subtract the mean acceleration vector over the
-              window to approximate the gravity/bias vector, then take the
-              magnitude of the residual.
         """
 
         arr = np.asarray(data, dtype=float)

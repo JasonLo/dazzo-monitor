@@ -21,9 +21,9 @@ battery_voltage = analogio.AnalogIn(board.A0)
 # Power saving measures
 wifi.radio.enabled = False
 microcontroller.cpu.frequency = 120_000_000
-bno055.mode = adafruit_bno055.ACCONLY_MODE
-bno055.accel_mode = adafruit_bno055.ACCEL_LOWPOWER1_MODE
-bno055.accel_bandwidth = adafruit_bno055.ACCEL_15_63HZ
+# bno055.mode = adafruit_bno055.ACCONLY_MODE
+# bno055.accel_mode = adafruit_bno055.ACCEL_LOWPOWER1_MODE
+# bno055.accel_bandwidth = adafruit_bno055.ACCEL_15_63HZ
 
 # BLE Advertising
 advertisement = ProvideServicesAdvertisement(uart)
@@ -40,7 +40,7 @@ while True:
 
     # Read sensors
     v = (battery_voltage.value * 3.3 / 65535) * VOLTAGE_MULTIPLIER
-    acc = bno055.acceleration or (0, 0, 0)
+    acc = bno055.linear_acceleration or (0, 0, 0)
     x, y, z = (acc[0] or 0, acc[1] or 0, acc[2] or 0)
 
     # Send data
