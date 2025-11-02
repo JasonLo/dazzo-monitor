@@ -1,6 +1,7 @@
 import time
 
 import adafruit_bno055
+import alarm
 import board
 import microcontroller
 import wifi
@@ -13,6 +14,11 @@ ble = BLERadio()
 uart = UARTService()
 i2c = board.I2C()
 bno055 = adafruit_bno055.BNO055_I2C(i2c)
+
+# Configuration
+MIN_TRANSMISSION_THRESHOLD = 0.2
+ACTIVE_SLEEP_DURATION_SECS = 1.0
+INACTIVE_SLEEP_DURATION_SECS = 5.0
 
 # Power saving measures
 wifi.radio.enabled = False
@@ -28,6 +34,7 @@ print("Ready")
 
 # Main loop
 while True:
+    # Advertise until connected
     if not ble.connected:
         if not ble.advertising:
             ble.start_advertising(advertisement)
@@ -38,7 +45,18 @@ while True:
     acc = bno055.linear_acceleration or (0, 0, 0)
     x, y, z = (acc[0] or 0, acc[1] or 0, acc[2] or 0)
 
-    # Send data
-    line = f"{x:.2f},{y:.2f},{z:.2f}\n"
-    uart.write(line.encode("utf-8"))
-    time.sleep(1)
+    # Calculate linear acceleration magnitude
+    magnitude = (x**2 + y**2 + z**2) ** 0.5
+
+    # Only transmit data if magnitude exceeds threshold
+    if magnitude >= MIN_TRANSMISSION_THRESHOLD:
+        uart.write(f"{x:.2f},{y:.2f},{z:.2f}\n".encode("utf-8"))
+        time_alarm = alarm.time.TimeAlarm(
+            monotonic_time=time.monotonic() + ACTIVE_SLEEP_DURATION_SECS
+        )
+        alarm.light_sleep_until_alarms(time_alarm)
+    else:
+        time_alarm = alarm.time.TimeAlarm(
+            monotonic_time=time.monotonic() + INACTIVE_SLEEP_DURATION_SECS
+        )
+        alarm.light_sleep_until_alarms(time_alarm)
