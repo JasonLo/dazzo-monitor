@@ -39,6 +39,7 @@ class DataProcessor:
 
         self.samples = deque(maxlen=1000)  # Data buffer
         self.last_report_time = time.time()
+        self.last_sent_activity: str = "init"
 
     def __repr__(self) -> str:
         return f"DataProcessor(report_period_s={self.report_period_s}, samples_count={len(self.samples)})"
@@ -65,11 +66,23 @@ class DataProcessor:
         data = np.array(list(self.samples))
         activity = self.classifier.classify(data)
         logging.info(f"Activity classification: {activity}")
-        if (
-            self.push_to_io and activity.get("activity", "") != "resting"
-        ):  # Only push non-resting activities
+
+        # Push logic: send every non-resting; for 'resting', send only the first in a consecutive sequence (for easy step auto graph).
+        current_activity = activity.get("activity", "")
+        should_push = False
+        if self.push_to_io:
+            if current_activity == "resting":
+                if self.last_sent_activity != "resting":
+                    should_push = True
+                else:
+                    logging.debug("Suppressing consecutive 'resting' activity report")
+            else:
+                should_push = True
+
+        if should_push:
             try:
                 push_data("dazzo", activity)
+                self.last_sent_activity = current_activity
             except Exception as e:
                 logging.error(f"Failed to push activity to Adafruit IO: {e}")
         # Clear samples after classification
