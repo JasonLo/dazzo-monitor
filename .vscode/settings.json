@@ -5,6 +5,7 @@
         "deepsleep",
         "LOWPOWER",
         "microcontroller",
+        "NDOF",
         "PSRAM",
         "rescan",
         "UART"

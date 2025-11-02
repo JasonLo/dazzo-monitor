@@ -9,25 +9,39 @@ from bleak import BleakClient, BleakScanner
 from bleak.backends.characteristic import BleakGATTCharacteristic
 from dotenv import load_dotenv
 
-from .classifier import ActivityClassifier
+from .classifier import ActivityClassifier, SensorMode
 
 load_dotenv()
-# Nordic UART Service (NUS)
+
+# Configuration
+TRANSMITTER_NAME = os.getenv("TRANSMITTER_NAME", "CIRCUITPY")
+SENSOR_MODE = SensorMode.NDOF
+MAX_BACKOFF_SECS = float(os.getenv("MAX_BACKOFF_SECS", "30"))
+REPORT_PERIOD_SECS = float(os.getenv("REPORT_PERIOD_SECS", "5"))
 UART_RX_CHAR_UUID = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
-TRANSMITTER_SENSOR_MODE = "linear"  # "accelerometer" or "linear"
 
 
 class DataProcessor:
     """Handles parsing incoming data, buffering samples, and periodic activity classification."""
 
-    def __init__(self, report_period_s: float = 5.0) -> None:
-        self.classifier = ActivityClassifier()
+    def __init__(
+        self,
+        classifier: ActivityClassifier,
+        report_period_s: float = REPORT_PERIOD_SECS,
+    ) -> None:
+        if report_period_s <= 0:
+            raise ValueError("report_period_s must be positive")
+        self.classifier = classifier
+        self.report_period_s = report_period_s
+
         self.samples = deque(maxlen=1000)  # Data buffer
         self.last_report_time = time.time()
-        self.report_interval = report_period_s
         self.latest_voltage: float | None = None
 
-    def process_line(self, line: str) -> None:
+    def __repr__(self) -> str:
+        return f"DataProcessor(report_period_s={self.report_period_s}, samples_count={len(self.samples)})"
+
+    def parse(self, line: str) -> dict[str, str | float] | None:
         """Parse a line of data and add to samples buffer."""
         try:
             parts = line.strip().split(",")
@@ -36,9 +50,12 @@ class DataProcessor:
                 x, y, z = float(parts[1]), float(parts[2]), float(parts[3])
                 self.samples.append((x, y, z))
                 self.latest_voltage = voltage
-                logging.debug(
-                    f"Voltage: {voltage:.2f}V, Accel: ({x:.2f}, {y:.2f}, {z:.2f})"
-                )
+                return {
+                    "voltage": voltage,
+                    "x": x,
+                    "y": y,
+                    "z": z,
+                }
             else:
                 logging.warning(f"Unexpected data format: {line.strip()}")
         except ValueError as e:
@@ -52,7 +69,7 @@ class DataProcessor:
 
         # Convert samples to numpy array
         data = np.array(list(self.samples))
-        activity = self.classifier.classify(data, input_type=TRANSMITTER_SENSOR_MODE)
+        activity = self.classifier.classify(data)
         logging.info(f"Activity classification: {activity}")
         # Clear samples after classification
         self.samples.clear()
@@ -64,137 +81,154 @@ class DataProcessor:
     async def periodic_report(self) -> None:
         """Run periodic activity and voltage reporting."""
         while True:
-            await asyncio.sleep(self.report_interval)
+            await asyncio.sleep(self.report_period_s)
             self.report_activity()
             if self.latest_voltage is not None:
                 self.report_voltage(self.latest_voltage)
 
 
-async def find_by_name(target_name: str) -> str | None:
-    """Scan for 5s and return the address of the first device matching name.
+class BLEManager:
+    """Manages BLE device discovery, connection, and data streaming with automatic reconnection."""
 
-    Matching rule: prefer exact name match (case-sensitive),
-    otherwise fall back to substring match (case-insensitive).
-    """
-    logging.info(f"Scanning for BLE devices (5s)... looking for '{target_name}'")
-    devices = await BleakScanner.discover(timeout=5.0)
-    if not devices:
-        logging.warning("No BLE devices found.")
+    def __init__(
+        self,
+        transmitter_name: str = TRANSMITTER_NAME,
+        max_backoff: float = MAX_BACKOFF_SECS,
+    ):
+        if not transmitter_name.strip():
+            raise ValueError("transmitter_name cannot be empty")
+        if max_backoff <= 0:
+            raise ValueError("max_backoff must be positive")
+        self.transmitter_name = transmitter_name
+        self.max_backoff = max_backoff
+        self.rx_buffer = bytearray()
+        self.last_addr: str | None = None
+
+    def __repr__(self) -> str:
+        return f"BLEManager(transmitter_name='{self.transmitter_name}', max_backoff={self.max_backoff})"
+
+    async def scan_for_device(self) -> str | None:
+        """Scan for 5s and return the address of the first device matching name.
+
+        Matching rule: prefer exact name match (case-sensitive),
+        otherwise fall back to substring match (case-insensitive).
+        """
+        logging.info(
+            f"Scanning for BLE devices (5s)... looking for '{self.transmitter_name}'"
+        )
+        devices = await BleakScanner.discover(timeout=5.0)
+        if not devices:
+            logging.warning("No BLE devices found.")
+            return None
+
+        # Try exact match first
+        for d in devices:
+            if (d.name or "") == self.transmitter_name:
+                logging.info(f"Found exact match: {d.name} [{d.address}]")
+                return d.address
+
+        # Fallback: substring case-insensitive
+        t = self.transmitter_name.lower()
+        for d in devices:
+            if t in (d.name or "").lower():
+                logging.info(f"Found partial match: {d.name} [{d.address}]")
+                return d.address
+
+        logging.info(f"No device matched name '{self.transmitter_name}'.")
         return None
 
-    # Try exact match first
-    for d in devices:
-        if (d.name or "") == target_name:
-            logging.info(f"Found exact match: {d.name} [{d.address}]")
-            return d.address
+    async def connect_and_stream(self, addr: str, processor: DataProcessor) -> None:
+        """Connect to the given address, accumulate bytes, and process complete newline-terminated lines."""
+        disconnected: asyncio.Event = asyncio.Event()
 
-    # Fallback: substring case-insensitive
-    t = target_name.lower()
-    for d in devices:
-        if t in (d.name or "").lower():
-            logging.info(f"Found partial match: {d.name} [{d.address}]")
-            return d.address
+        def on_disconnect(_: BleakClient) -> None:
+            logging.info("Disconnected.")
+            disconnected.set()
 
-    logging.info(f"No device matched name '{target_name}'.")
-    return None
+        def handle_received_bytes(
+            _: BleakGATTCharacteristic | int | str, data: bytearray
+        ) -> None:
+            self.rx_buffer.extend(data)
 
+            while True:
+                newline_index = self.rx_buffer.find(b"\n")
+                if newline_index == -1:
+                    break
 
-async def _connect_and_stream(
-    addr: str, rx_buffer: bytearray, processor: DataProcessor
-) -> None:
-    """Connect to the given address, stream notifications until disconnected.
+                line_bytes = self.rx_buffer[:newline_index]
+                del self.rx_buffer[: newline_index + 1]
 
-    Returns when the device disconnects or an error occurs.
-    """
-    disconnected: asyncio.Event = asyncio.Event()
+                line_str = line_bytes.rstrip(b"\r").decode("utf-8", errors="replace")
+                if not line_str:
+                    continue
 
-    def on_disconnect(_: BleakClient) -> None:
-        logging.info("Disconnected.")
-        disconnected.set()
+                try:
+                    parsed = processor.parse(line_str)
+                    if parsed:
+                        logging.debug(
+                            f"Voltage: {parsed.get('voltage'):.2f}V, Accel: ({parsed.get('x'):.2f}, {parsed.get('y'):.2f}, {parsed.get('z'):.2f})"
+                        )
+                except Exception:
+                    logging.error(f"Failed to process line: {repr(line_str)}")
 
-    def handle_received_bytes(
-        _: BleakGATTCharacteristic | int, data: bytearray
-    ) -> None:
-        rx_buffer.extend(data)
-        # Process all complete lines found in buffer
+        logging.info(f"Connecting to {addr} ...")
+        async with BleakClient(addr, disconnected_callback=on_disconnect) as client:
+            logging.info("Connected. Subscribing to notifications...")
+            await client.start_notify(UART_RX_CHAR_UUID, handle_received_bytes)
+            logging.info("Receiving data. Press Ctrl+C to stop.")
+            await disconnected.wait()
+
+    async def run(self, processor: DataProcessor) -> None:
+        """Run the main connection loop with automatic reconnection."""
+        backoff: float = 1.0
+
         while True:
-            try:
-                idx = rx_buffer.index(0x0A)  # '\n'
-            except ValueError:
-                break
-            line = bytes(rx_buffer[:idx])
-            # remove the processed line + delimiter
-            del rx_buffer[: idx + 1]
-            try:
-                line_str = line.decode("utf-8", errors="replace")
-                processor.process_line(line_str)
-            except Exception:
-                logging.error(repr(line))
-
-    logging.info(f"Connecting to {addr} ...")
-    async with BleakClient(addr, disconnected_callback=on_disconnect) as client:
-        logging.info("Connected. Subscribing to notifications...")
-        await client.start_notify(UART_RX_CHAR_UUID, handle_received_bytes)
-        logging.info("Receiving data. Press Ctrl+C to stop.")
-        await disconnected.wait()
-
-
-async def main() -> None:
-    load_dotenv()
-    target_name: str = os.getenv("QT_PY_BLUETOOTH_NAME", "CIRCUITPY")
-
-    # Initialize data processor
-    processor = DataProcessor()
-
-    # Keep buffer across reconnects so we don't lose partial lines
-    rx_buffer = bytearray()
-
-    # Remember last successful address to speed up subsequent reconnects
-    last_addr: str | None = None
-
-    # Exponential backoff for retries (caps at 30s)
-    backoff: float = 1.0
-    max_backoff: float = float(os.getenv("RESUME_MAX_BACKOFF_SECS", "30"))
-
-    # Start periodic reporting task
-    report_task = asyncio.create_task(processor.periodic_report())
-
-    try:
-        while True:
-            addr: str | None = last_addr
-            # If we don't have a known address, scan by name
+            addr: str | None = self.last_addr
             if not addr:
-                addr = await find_by_name(target_name)
+                addr = await self.scan_for_device()
                 if not addr:
                     logging.warning(
-                        f"No device matched '{target_name}'. Retrying in {backoff:.0f}s..."
+                        f"No device matched '{self.transmitter_name}'. Retrying in {backoff:.0f}s..."
                     )
                     await asyncio.sleep(backoff)
-                    backoff = min(backoff * 2, max_backoff)
+                    backoff = min(backoff * 2, self.max_backoff)
                     continue
 
             try:
-                await _connect_and_stream(addr, rx_buffer, processor)
-                # Successful session ended due to disconnect; remember address and reset backoff
-                last_addr = addr
+                await self.connect_and_stream(addr, processor)
+                self.last_addr = addr
                 backoff = 1.0
-                # Small pause before attempting to reconnect to avoid thrashing
                 await asyncio.sleep(1.0)
                 logging.info("Attempting to resume connection...")
             except Exception as e:
                 logging.error(f"Connection error: {e}")
-                # Force a rescan next iteration
-                last_addr = None
+                self.last_addr = None
                 logging.info(f"Retrying in {backoff:.0f}s...")
                 await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, max_backoff)
+                backoff = min(backoff * 2, self.max_backoff)
+
+
+async def run_receiver(sensor_mode: SensorMode) -> None:
+    """Main receiver loop: connect, receive data, classify activity, and handle re-connections."""
+
+    classifier = ActivityClassifier(sensor_mode=sensor_mode)
+    processor = DataProcessor(classifier=classifier)
+    ble_manager = BLEManager(transmitter_name=TRANSMITTER_NAME)
+
+    report_task = asyncio.create_task(processor.periodic_report())
+
+    try:
+        await ble_manager.run(processor)
     finally:
-        # Cancel the reporting task on exit
         report_task.cancel()
         try:
             await report_task
         except asyncio.CancelledError:
             pass
+
+
+async def main() -> None:
+    await run_receiver(sensor_mode=SENSOR_MODE)
 
 
 if __name__ == "__main__":
