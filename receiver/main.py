@@ -36,22 +36,18 @@ class DataProcessor:
 
         self.samples = deque(maxlen=1000)  # Data buffer
         self.last_report_time = time.time()
-        self.latest_voltage: float | None = None
 
     def __repr__(self) -> str:
         return f"DataProcessor(report_period_s={self.report_period_s}, samples_count={len(self.samples)})"
 
-    def parse(self, line: str) -> dict[str, str | float] | None:
+    def parse(self, line: str) -> dict[str, float] | None:
         """Parse a line of data and add to samples buffer."""
         try:
             parts = line.strip().split(",")
-            if len(parts) == 4:
-                voltage = float(parts[0])
-                x, y, z = float(parts[1]), float(parts[2]), float(parts[3])
+            if len(parts) == 3:
+                x, y, z = float(parts[0]), float(parts[1]), float(parts[2])
                 self.samples.append((x, y, z))
-                self.latest_voltage = voltage
                 return {
-                    "voltage": voltage,
                     "x": x,
                     "y": y,
                     "z": z,
@@ -74,17 +70,11 @@ class DataProcessor:
         # Clear samples after classification
         self.samples.clear()
 
-    def report_voltage(self, voltage: float) -> None:
-        """Log the latest voltage reading."""
-        logging.info(f"Battery voltage: {voltage:.2f}V")
-
     async def periodic_report(self) -> None:
-        """Run periodic activity and voltage reporting."""
+        """Run periodic activity reporting."""
         while True:
             await asyncio.sleep(self.report_period_s)
             self.report_activity()
-            if self.latest_voltage is not None:
-                self.report_voltage(self.latest_voltage)
 
 
 class BLEManager:
@@ -166,7 +156,7 @@ class BLEManager:
                     parsed = processor.parse(line_str)
                     if parsed:
                         logging.debug(
-                            f"Voltage: {parsed.get('voltage'):.2f}V, Accel: ({parsed.get('x'):.2f}, {parsed.get('y'):.2f}, {parsed.get('z'):.2f})"
+                            f"Accel: ({parsed.get('x'):.2f}, {parsed.get('y'):.2f}, {parsed.get('z'):.2f})"
                         )
                 except Exception:
                     logging.error(f"Failed to process line: {repr(line_str)}")
