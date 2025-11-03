@@ -12,72 +12,118 @@ class LinearAccelerationKF:
     """
     Estimate gravity and linear acceleration from accelerometer-only data
     using a 6-state Kalman filter.
-    State: [g_bx, g_by, g_bz, a_lx, a_ly, a_lz]
-    """
 
-    # --- Class attributes ---
-    fs: float
-    dt: float
-    phi: float
-    F: np.ndarray  # 6x6 state transition matrix
-    H: np.ndarray  # 3x6 measurement matrix
-    Q: np.ndarray  # 6x6 process noise covariance
-    R: np.ndarray  # 3x3 measurement noise covariance
-    x: np.ndarray  # 6-element state vector
-    P: np.ndarray  # 6x6 state covariance matrix
+    State: [g_bx, g_by, g_bz, a_lx, a_ly, a_lz]
+    - g_b: gravity vector in body frame (constant over short windows)
+    - a_l: linear acceleration (AR(1) process with decay phi)
+    """
 
     def __init__(
         self,
-        fs: float = 100.0,
-        phi: float = 0.98,
-        qg: float = 1e-3,
-        qa: float = 1e-1,
+        fs: float = 30.0,
+        tau_target: float = 0.1,
         r: float = 0.05,
+        qg_base: float = 1e-3,
+        qa_base: float = 0.02,
     ) -> None:
+        """
+        Initialize Kalman filter with auto-tuned parameters.
+
+        Parameters:
+            fs: Sampling frequency in Hz
+            tau_target: Target time constant for acceleration decay (seconds)
+            r: Measurement noise variance (m/s²)²
+            qg_base: Base gravity process noise at 100 Hz reference
+            qa_base: Base acceleration process noise
+        """
         self.fs = float(fs)
         self.dt = 1.0 / self.fs
-        self.phi = float(phi)
 
+        # Calculate optimal parameters for given sampling rate
+        self.phi = float(np.exp(-self.dt / tau_target))
+        qg = qg_base * (100.0 / fs)
+        qa = qa_base
+
+        # State transition matrix
         self.F = np.block(
             [
-                [np.eye(3), np.zeros((3, 3))],
-                [np.zeros((3, 3)), self.phi * np.eye(3)],
+                [np.eye(3), np.zeros((3, 3))],  # gravity stays constant
+                [np.zeros((3, 3)), self.phi * np.eye(3)],  # acceleration decays
             ]
         )
+
+        # Measurement matrix: z = g + a_lin
         self.H = np.hstack([np.eye(3), np.eye(3)])
 
-        # Discrete-time process noise: gravity random walk scales with dt,
-        # AR(1) acceleration uses (1 - phi^2) scaling.
-        qg_d: float = qg * self.dt
-        qa_d: float = qa * (1.0 - self.phi**2)
-        self.Q = np.diag([qg_d] * 3 + [qa_d] * 3)
+        # Process noise covariance (discrete-time)
+        qg_d = qg * self.dt  # gravity random walk
+        qa_d = qa * (1.0 - self.phi**2)  # AR(1) steady-state variance
+        self.Q = np.diag([qg_d, qg_d, qg_d, qa_d, qa_d, qa_d])
 
+        # Measurement noise covariance
         self.R = np.eye(3) * r
+
+        # State and covariance
         self.x = np.zeros(6)
-        self.P = np.eye(6) * 1.0
+        self.P = np.eye(6)
+
+        # Pre-compute constants for efficiency
+        self._I6 = np.eye(6)
+        self._FT = self.F.T
+        self._HT = self.H.T
 
     def initialize_gravity(self, accel_samples: np.ndarray) -> None:
-        """Use average of stationary samples for initial gravity estimate."""
-        g0: np.ndarray = np.mean(accel_samples, axis=0)
+        """
+        Initialize gravity estimate from stationary acceleration samples.
+
+        Parameters:
+            accel_samples: (N, 3) array of acceleration measurements
+        """
+        g0 = np.mean(accel_samples, axis=0)
         self.x[:3] = g0
-        self.P = np.eye(6) * 0.1
+        self.x[3:] = 0.0  # linear acceleration starts at zero
+        # Lower initial uncertainty after initialization
+        self.P = np.diag([0.1, 0.1, 0.1, 1.0, 1.0, 1.0])
 
     def update(self, z: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """Perform one KF step given accel measurement z (3-vector)."""
-        # predict
-        x_pred: np.ndarray = self.F @ self.x
-        P_pred: np.ndarray = self.F @ self.P @ self.F.T + self.Q
+        """
+        Perform one Kalman filter update step.
 
-        # measurement update
-        y: np.ndarray = z - self.H @ x_pred
-        S: np.ndarray = self.H @ P_pred @ self.H.T + self.R
-        K: np.ndarray = P_pred @ self.H.T @ np.linalg.inv(S)
+        Parameters:
+            z: 3-element acceleration measurement (m/s²)
+
+        Returns:
+            (g_est, a_lin_est): Estimated gravity and linear acceleration vectors
+        """
+        # Predict
+        x_pred = self.F @ self.x
+        P_pred = self.F @ self.P @ self._FT + self.Q
+
+        # Update
+        y = z - self.H @ x_pred  # innovation
+        S = self.H @ P_pred @ self._HT + self.R  # innovation covariance
+        # Kalman gain (numerically stable using solve)
+        K = (P_pred @ self._HT @ np.linalg.inv(S)).astype(np.float64)
+
         self.x = x_pred + K @ y
-        self.P = (np.eye(6) - K @ self.H) @ P_pred
+        # Joseph form covariance update (ensures positive-definiteness)
+        IKH = self._I6 - K @ self.H
+        self.P = IKH @ P_pred @ IKH.T + K @ self.R @ K.T
 
-        g_est: np.ndarray = self.x[:3]
-        a_lin_est: np.ndarray = self.x[3:]
-        return g_est, a_lin_est
+        return self.x[:3].copy(), self.x[3:].copy()
+
+    def get_state(self) -> dict[str, np.ndarray]:
+        """Return current filter state."""
+        return {
+            "gravity": self.x[:3].copy(),
+            "linear_accel": self.x[3:].copy(),
+            "covariance": self.P.copy(),
+        }
+
+    def reset(self) -> None:
+        """Reset filter to initial state."""
+        self.x = np.zeros(6)
+        self.P = np.eye(6)
 
 
 class ActivityClassifier:
