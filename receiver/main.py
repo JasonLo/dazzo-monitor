@@ -69,24 +69,21 @@ class DataProcessor:
         activity = self.classifier.classify(data)
         logging.info(f"Activity classification: {activity}")
 
-        # Push logic: send every non-resting; for 'resting', send only the first in a consecutive sequence (for easy step auto graph).
-        current_activity = activity.get("activity", "")
-        should_push = False
         if self.push_to_io:
-            if current_activity == "resting":
-                if self.last_sent_activity != "resting":
-                    should_push = True
-                else:
-                    logging.debug("Suppressing consecutive 'resting' activity report")
-            else:
-                should_push = True
+            # Push logic: send every non-resting; for 'resting', send only the first in a consecutive sequence (for easy step auto graph).
+            current_activity = activity.get("activity", "")
+            should_push = (
+                current_activity != "resting" or self.last_sent_activity != "resting"
+            )
 
-        if should_push:
-            try:
-                push_to_adafruit_io("dazzo", activity)
-                self.last_sent_activity = current_activity
-            except Exception as e:
-                logging.error(f"Failed to push activity to Adafruit IO: {e}")
+            if should_push:
+                try:
+                    push_to_adafruit_io("dazzo", activity)
+                    self.last_sent_activity = current_activity
+                except Exception as e:
+                    logging.error(f"Failed to push activity to Adafruit IO: {e}")
+            else:
+                logging.debug("Suppressing consecutive 'resting' activity report")
 
         # Independently push to InfluxDB (if enabled). We always write each report
         # to maintain a regular time series, regardless of the Adafruit IO suppression
