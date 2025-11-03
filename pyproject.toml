@@ -13,3 +13,5 @@ dependencies = [
     "pandas>=2.3.3",
     "httpx>=0.28.1",
 ]
+
+license = { text = "CC0-1.0" }

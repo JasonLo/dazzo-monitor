@@ -2,11 +2,14 @@
     "cSpell.words": [
         "ACCONLY",
         "analogio",
+        "automations",
         "CIRCUITPY",
+        "circuitpython",
         "deepsleep",
         "LOWPOWER",
         "microcontroller",
         "NDOF",
+        "numpy",
         "PSRAM",
         "rescan",
         "UART"

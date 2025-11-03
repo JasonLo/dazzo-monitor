@@ -1,6 +1,11 @@
+
 # Dazzo Monitor
 
 Ultra-lightweight BLE movement tracker for indoor pet monitoring.
+
+[![CC0 1.0 Universal](https://img.shields.io/badge/License-CC0%201.0-lightgrey.svg)](https://creativecommons.org/publicdomain/zero/1.0/)
+
+This project is dedicated to the public domain under the [CC0 1.0 Universal license](https://creativecommons.org/publicdomain/zero/1.0/). See the LICENSE file for details.
 
 ![receiver](img/receiver.jpg)
 
