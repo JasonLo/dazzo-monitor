@@ -15,15 +15,12 @@ i2c = board.I2C()
 bno055 = adafruit_bno055.BNO055_I2C(i2c)
 
 # Configuration
-SLEEP_DURATION_SECS = 3.0
+SEND_FREQ_HZ = 30
 
 # Power saving measures
 microcontroller.cpu.frequency = 120_000_000
-# bno055.mode = adafruit_bno055.ACCONLY_MODE
-# bno055.accel_mode = adafruit_bno055.ACCEL_LOWPOWER1_MODE
-# bno055.accel_bandwidth = adafruit_bno055.ACCEL_7_81HZ
-# bno055.accel_range = adafruit_bno055.ACCEL_2G
-
+bno055.mode = adafruit_bno055.ACCONLY_MODE
+bno055.accel_bandwidth = adafruit_bno055.ACCEL_31_25HZ
 
 # BLE Advertising
 advertisement = ProvideServicesAdvertisement(uart)
@@ -46,11 +43,9 @@ while True:
     ble.stop_advertising()
 
     # Read sensors
-    acc = bno055.linear_acceleration or (0, 0, 0)
+    acc = bno055.acceleration or (0, 0, 0)
     x, y, z = (acc[0] or 0, acc[1] or 0, acc[2] or 0)
     uart.write(f"{x:.2f},{y:.2f},{z:.2f}\n".encode("utf-8"))
 
     # Sleep sequence
-    bno055.set_suspend_mode()
-    time.sleep(SLEEP_DURATION_SECS)
-    bno055.set_normal_mode()
+    time.sleep(1.0 / SEND_FREQ_HZ)

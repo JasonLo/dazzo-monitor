@@ -85,13 +85,18 @@ class ActivityClassifier:
 
     def __init__(
         self,
-        sensor_mode: SensorMode = SensorMode.NDOF,
+        sensor_mode: SensorMode = SensorMode.ACCONLY,
         rest_threshold: float = 1.0,
         active_threshold: float = 3.0,
+        fs: float = 30.0,
     ) -> None:
         self.sensor_mode = sensor_mode
         self.rest_threshold = rest_threshold
         self.active_threshold = active_threshold
+        # Sampling rate for the accelerometer stream (Hz)
+        self.fs: float = float(fs)
+        # Lazily created Kalman filter for accelerometer-only mode
+        self._kf: LinearAccelerationKF | None = None
 
     def classify(self, data: np.ndarray) -> dict[str, str | float]:
         """Classify activity level based on a window of acceleration samples.
@@ -116,9 +121,17 @@ class ActivityClassifier:
             raise ValueError("Input must have shape (N, 3)")
 
         if self.sensor_mode == SensorMode.ACCONLY:
-            # Approximate gravity as the mean acceleration vector in the window (bad precision but power efficient)
-            g_vec = arr.mean(axis=0)
-            dynamic = arr - g_vec
+            # Use a lightweight 6-state Kalman filter to separate gravity and linear acceleration.
+            if self._kf is None:
+                self._kf = LinearAccelerationKF(fs=self.fs)
+                # Initialize gravity estimate using the first window (assumed roughly stationary on average)
+                self._kf.initialize_gravity(arr)
+
+            dyn_list: list[np.ndarray] = []
+            for z in arr:
+                _, a_lin = self._kf.update(z)
+                dyn_list.append(a_lin)
+            dynamic = np.vstack(dyn_list)
         elif self.sensor_mode == SensorMode.NDOF:
             dynamic = arr
         else:
