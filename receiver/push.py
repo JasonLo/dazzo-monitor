@@ -1,4 +1,3 @@
-import logging
 import os
 from typing import Any
 
@@ -18,9 +17,9 @@ INFLUXDB_TOKEN = os.getenv("INFLUXDB_TOKEN", "")
 
 def push_to_adafruit_io(group_key: str, data: dict[str, Any]) -> None:
     """Push a value to the specified Adafruit IO group."""
-    url = (
-        f"https://io.adafruit.com/api/v2/{ADAFRUIT_IO_USERNAME}/groups/{group_key}/data"
-    )
+
+    base_url = "https://io.adafruit.com/api/v2/"
+    url = f"{base_url}{ADAFRUIT_IO_USERNAME}/groups/{group_key}/data"
 
     headers = {
         "X-AIO-Key": ADAFRUIT_IO_KEY,
@@ -28,13 +27,23 @@ def push_to_adafruit_io(group_key: str, data: dict[str, Any]) -> None:
     }
 
     payload = {"feeds": [{"key": k, "value": str(v)} for k, v in data.items()]}
-
     response = httpx.post(url, headers=headers, json=payload)
     response.raise_for_status()
 
-    logging.debug(
-        f"Pushed {data} to group '{group_key}' (status {response.status_code})"
-    )
+
+def to_influx_line_protocol(data: dict[str, Any], sensor_name: str) -> str:
+    """Convert data dict to valid InfluxDB line protocol."""
+    line_protocol_lines = []
+    for key, value in data.items():
+        if isinstance(value, str):
+            field = f'value="{value}"'
+        elif isinstance(value, (int, float)):
+            field = f"value={value}"
+        else:
+            continue  # skip unsupported types
+        line = f"{key},sensor={sensor_name} {field}"
+        line_protocol_lines.append(line)
+    return "\n".join(line_protocol_lines)
 
 
 def push_to_influxdb(
@@ -53,24 +62,6 @@ def push_to_influxdb(
         "Authorization": f"Token {token}",
         "Content-Type": "text/plain; charset=utf-8",
     }
-
-    # Convert data dict to valid InfluxDB line protocol
-    line_protocol_lines = []
-    for key, value in data.items():
-        if isinstance(value, str):
-            field = f'value="{value}"'
-        elif isinstance(value, (int, float)):
-            field = f"value={value}"
-        else:
-            continue  # skip unsupported types
-        line = f"{key},sensor={sensor_name} {field}"
-        line_protocol_lines.append(line)
-
-    payload = "\n".join(line_protocol_lines)
-
-    response = httpx.post(url, params=params, headers=headers, data=payload)
+    content = to_influx_line_protocol(data, sensor_name)
+    response = httpx.post(url, params=params, headers=headers, content=content)
     response.raise_for_status()
-
-    logging.debug(
-        f"Pushed data to InfluxDB bucket '{bucket}' (status {response.status_code})"
-    )
