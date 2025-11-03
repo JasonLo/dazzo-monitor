@@ -1,0 +1,14 @@
+services:
+  influxdb:
+    container_name: influxdb
+    image: influxdb:latest
+    environment:
+      - INFLUXDB_HTTP_AUTH_ENABLED=false
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb_data:/var/lib/influxdb
+    restart: unless-stopped
+
+volumes:
+  influxdb_data:

@@ -1,6 +1,6 @@
 # Dazzo Monitor
 
-Ultra-lightweight (10g) BLE movement tracker for indoor pet monitoring.
+Ultra-lightweight BLE movement tracker for indoor pet monitoring.
 
 ![receiver](img/receiver.jpg)
 
