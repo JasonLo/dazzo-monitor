@@ -10,7 +10,7 @@ from bleak.backends.characteristic import BleakGATTCharacteristic
 from dotenv import load_dotenv
 
 from .classifier import ActivityClassifier, SensorMode
-from .push import push_data
+from .push import push_to_adafruit_io, push_to_influxdb
 
 load_dotenv()
 
@@ -30,12 +30,14 @@ class DataProcessor:
         classifier: ActivityClassifier,
         report_period_s: float = REPORT_PERIOD_SECS,
         push_to_io: bool = False,
+        push_to_influx: bool = False,
     ) -> None:
         if report_period_s <= 0:
             raise ValueError("report_period_s must be positive")
         self.classifier = classifier
         self.report_period_s = report_period_s
         self.push_to_io = push_to_io
+        self.push_to_influx = push_to_influx
 
         self.samples = deque(maxlen=1000)  # Data buffer
         self.last_report_time = time.time()
@@ -81,10 +83,19 @@ class DataProcessor:
 
         if should_push:
             try:
-                push_data("dazzo", activity)
+                push_to_adafruit_io("dazzo", activity)
                 self.last_sent_activity = current_activity
             except Exception as e:
                 logging.error(f"Failed to push activity to Adafruit IO: {e}")
+
+        # Independently push to InfluxDB (if enabled). We always write each report
+        # to maintain a regular time series, regardless of the Adafruit IO suppression
+        # logic above.
+        if self.push_to_influx:
+            try:
+                push_to_influxdb(activity)
+            except Exception as e:
+                logging.error(f"Failed to push activity to InfluxDB: {e}")
         # Clear samples after classification
         self.samples.clear()
 
@@ -214,11 +225,17 @@ class BLEManager:
                 backoff = min(backoff * 2, self.max_backoff)
 
 
-async def run_receiver(sensor_mode: SensorMode, push_to_io: bool) -> None:
+async def run_receiver(
+    sensor_mode: SensorMode,
+    push_to_io: bool,
+    push_to_influx: bool,
+) -> None:
     """Main receiver loop: connect, receive data, classify activity, and handle re-connections."""
 
     classifier = ActivityClassifier(sensor_mode=sensor_mode)
-    processor = DataProcessor(classifier=classifier, push_to_io=push_to_io)
+    processor = DataProcessor(
+        classifier=classifier, push_to_io=push_to_io, push_to_influx=push_to_influx
+    )
     ble_manager = BLEManager(transmitter_name=TRANSMITTER_NAME)
 
     report_task = asyncio.create_task(processor.periodic_report())
@@ -234,7 +251,15 @@ async def run_receiver(sensor_mode: SensorMode, push_to_io: bool) -> None:
 
 
 async def main() -> None:
-    await run_receiver(sensor_mode=SENSOR_MODE, push_to_io=True)
+    push_influx: bool = bool(os.getenv("INFLUXDB_TOKEN", "").strip())
+    has_io_key: bool = bool(os.getenv("ADAFRUIT_IO_KEY", "").strip())
+    has_io_username: bool = bool(os.getenv("ADAFRUIT_IO_USERNAME", "").strip())
+    push_to_adafruit_io: bool = has_io_key and has_io_username
+    await run_receiver(
+        sensor_mode=SENSOR_MODE,
+        push_to_io=push_to_adafruit_io,
+        push_to_influx=push_influx,
+    )
 
 
 if __name__ == "__main__":

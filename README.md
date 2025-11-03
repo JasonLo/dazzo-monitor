@@ -35,3 +35,33 @@ uv sync
 cd receiver
 uv run main.py
 ```
+
+### Optional: Self-hosted InfluxDB integration
+
+This project can stream activity summaries to InfluxDB (v2) using the HTTP API. A Docker Compose service is provided for local development.
+
+1. Start InfluxDB locally (optional):
+
+    ```bash
+    docker compose up -d influxdb
+    ```
+
+2. Configure the following environment variables (for example in a local `.env` file):
+
+    - `INFLUXDB_URL` (default: `http://localhost:8086`)
+    - `INFLUXDB_ORG` (default: `home`)
+    - `INFLUXDB_BUCKET` (default: `dazzo`)
+    - `INFLUXDB_TOKEN` (required for writes)
+
+    When `INFLUXDB_TOKEN` is set, the receiver will automatically push each activity report to InfluxDB.
+
+### Optional: Adafruit IO integration
+
+You can stream activity summaries to [Adafruit IO](https://io.adafruit.com/) for easy cloud dashboards and automations.
+
+1. Create a free Adafruit IO account and generate an **AIO Key**.
+2. Create a group called `dazzo` (or use your preferred group name).
+3. Add the following environment variables (e.g., in a local `.env` file):
+    - `ADAFRUIT_IO_USERNAME` (your Adafruit IO username)
+    - `ADAFRUIT_IO_KEY` (your Adafruit IO key)
+4. When both variables are set, the receiver will push activity reports to Adafruit IO. Each activity (e.g., `resting`, `active`, etc.) is sent as a feed in the group.
