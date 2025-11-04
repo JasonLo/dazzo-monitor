@@ -22,7 +22,6 @@ bno055.accel_bandwidth = adafruit_bno055.ACCEL_31_25HZ
 
 # BLE Advertising
 advertisement = ProvideServicesAdvertisement(uart)
-print("Ready to connect!")
 
 # Main loop
 while True:
@@ -30,22 +29,21 @@ while True:
     if not ble.connected:
         if not ble.advertising:
             try:
+                print("Start advertising...")
                 ble.start_advertising(advertisement)
             except Exception as e:
                 print(f"Failed to start advertising: {e}")
                 gc.collect()
-        time.sleep(0.5)
+        time.sleep(3)
         continue
-
-    print("Connected!")
-    if ble.advertising:
-        ble.stop_advertising()
 
     # Read sensors
     try:
-        acc = bno055.acceleration or (0, 0, 0)
-        x, y, z = (acc[0] or 0, acc[1] or 0, acc[2] or 0)
-        uart.write(f"{x:.2f},{y:.2f},{z:.2f}\n".encode("utf-8"))
+        uart.write(
+            f"{bno055.acceleration[0]},{bno055.acceleration[1]},{bno055.acceleration[2]}\n".encode(
+                "utf-8"
+            )
+        )
     except Exception as e:
         print(f"Sensor read/send error: {e}")
 
