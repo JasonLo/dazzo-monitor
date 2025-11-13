@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import sys
+import time
 
 import serial
 import serial.tools.list_ports
@@ -90,11 +91,38 @@ def process_serial_data(
         # Discard initial incomplete line
         ser.readline()
 
+        # Track timing for inactivity detection
+        last_data_time = time.monotonic()
+        idle_zero_posted = False
+
         while True:
             try:
                 line = ser.readline().decode("utf-8", errors="replace").strip()
 
+                # If no data arrived within the serial timeout, consider posting zeros
                 if not line:
+                    now = time.monotonic()
+                    if (now - last_data_time) >= 1.0 and not idle_zero_posted:
+                        zero_data = {"x": 0, "y": 0, "z": 0}
+                        logging.info(
+                            "Inactivity >1s detected; posting zeros: x=0, y=0, z=0"
+                        )
+                        if push_to_influx:
+                            try:
+                                push_to_influxdb(
+                                    zero_data,
+                                    sensor_name=sensor_name,
+                                    bucket=INFLUXDB_BUCKET,
+                                    org=INFLUXDB_ORG,
+                                    token=INFLUXDB_TOKEN,
+                                    influxdb_url=INFLUXDB_URL,
+                                )
+                                logging.debug("Posted zero values to InfluxDB")
+                            except Exception as e:
+                                logging.error(
+                                    f"Failed to push zero values to InfluxDB: {e}"
+                                )
+                        idle_zero_posted = True
                     continue
 
                 # Skip non-JSON lines (status messages, etc.)
@@ -115,8 +143,12 @@ def process_serial_data(
                     continue
 
                 logging.info(
-                    f"Received: x={data['x']:.6f}, y={data['y']:.6f}, z={data['z']:.6f}"
+                    f"Received: x={data['x']:.2f}, y={data['y']:.2f}, z={data['z']:.2f}"
                 )
+
+                # Update inactivity tracking on valid data
+                last_data_time = time.monotonic()
+                idle_zero_posted = False
 
                 # Push to InfluxDB
                 if push_to_influx:
