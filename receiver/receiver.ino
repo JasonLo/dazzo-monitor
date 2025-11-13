@@ -5,16 +5,7 @@
 #include <WiFi.h>
 #include <esp_wifi.h>
 
-// Load sensor name from secrets.h if present
-#if defined(__has_include)
-#  if __has_include("secrets.h")
-#    include "secrets.h"
-#  else
-#    define SENSOR_NAME            "feather-receiver"
-#  endif
-#else
-#  include "secrets.h"
-#endif
+// No secrets required
 
 // Initialize the TFT display
 Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);

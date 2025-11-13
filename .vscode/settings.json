@@ -3,6 +3,7 @@
         "ACCONLY",
         "analogio",
         "automations",
+        "baudrate",
         "CIRCUITPY",
         "circuitpython",
         "deepsleep",
@@ -14,6 +15,7 @@
         "pyserial",
         "rescan",
         "UART",
-        "usbmodem"
+        "usbmodem",
+        "usbserial"
     ]
 }

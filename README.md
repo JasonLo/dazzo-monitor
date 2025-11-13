@@ -44,12 +44,11 @@ Data flows via ESP-NOW from transmitter to receiver, then via USB serial to the 
 ### Setup
 
 1. Open [`receiver/receiver.ino`](receiver/receiver.ino) in Arduino IDE
-2. (Optional) Create `secrets.h` to customize `SENSOR_NAME`
-3. Upload to the ESP32-S3 Feather
-4. Open Serial Monitor (115200 baud) - the MAC address will be printed at startup
-5. Note the receiver's MAC address (format: `B8:F8:62:D5:D1:D0`) for transmitter configuration
-6. Connect via USB to your Mac running the server
-7. The receiver displays motion data on the TFT and streams JSON via USB serial
+2. Upload to the ESP32-S3 Feather
+3. Open Serial Monitor (115200 baud) - the MAC address prints at startup and stays on the TFT first line
+4. Note the receiver MAC (e.g. `B8:F8:62:D5:D1:D0`) for transmitter config
+5. Connect via USB to your Mac running the server
+6. The receiver displays motion data on the TFT and streams JSON via USB serial
 
 ## Server
 

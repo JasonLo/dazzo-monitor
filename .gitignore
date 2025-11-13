@@ -18,3 +18,4 @@ wheels/
 
 # Private firmware credentials
 secrets.h
+config.h

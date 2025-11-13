@@ -14,11 +14,7 @@ import serial
 import serial.tools.list_ports
 from dotenv import load_dotenv
 
-# Try relative import first (when running as module), fall back to direct import
-try:
-    from .push import push_to_influxdb
-except ImportError:
-    from push import push_to_influxdb
+from server.push import push_to_influxdb
 
 load_dotenv()
 
