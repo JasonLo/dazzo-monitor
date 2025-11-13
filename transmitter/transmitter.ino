@@ -3,15 +3,17 @@
 #include <WiFi.h>
 #include <Adafruit_BNO055.h>
 #include <Adafruit_Sensor.h>
+#include "config.h"
 
 // BNO055 setup
 Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x28);
 
 // Thresholds
-const float MIN_TRANSMISSION_THRESHOLD = 0.2;
+const float MIN_TRANSMISSION_THRESHOLD = 1;
+const unsigned long MIN_SEND_INTERVAL = 60000; // 1 minute in milliseconds
 
-// Receiver MAC address (replace with your peer)
-uint8_t peerAddress[] = {0xB8, 0xF8, 0x62, 0xD5, 0xD1, 0xD0};
+// Timing
+unsigned long lastSendTime = 0;
 
 // Structure to send
 typedef struct {
@@ -52,11 +54,16 @@ void loop() {
   float x = acc.x(), y = acc.y(), z = acc.z();
   float magnitude = sqrt(x*x + y*y + z*z);
 
-  if (magnitude >= MIN_TRANSMISSION_THRESHOLD) {
+  unsigned long currentTime = millis();
+  bool shouldSend = (magnitude >= MIN_TRANSMISSION_THRESHOLD) || 
+                    (currentTime - lastSendTime >= MIN_SEND_INTERVAL);
+
+  if (shouldSend) {
     SensorData data = {x, y, z};
     esp_err_t result = esp_now_send(peerAddress, (uint8_t*)&data, sizeof(data));
     if (result == ESP_OK) {
-      Serial.printf("Sent: %.2f, %.2f, %.2f\n", x, y, z);
+      Serial.printf("Sent: %.2f, %.2f, %.2f (mag: %.2f)\n", x, y, z, magnitude);
+      lastSendTime = currentTime;
     } else {
       Serial.println("Send failed");
     }

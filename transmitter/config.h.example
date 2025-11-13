@@ -1,0 +1,8 @@
+#ifndef CONFIG_H
+#define CONFIG_H
+
+// Receiver MAC address (replace with your peer's MAC address)
+// You can find the MAC address by running WiFi.macAddress() on the receiver
+uint8_t peerAddress[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+
+#endif // CONFIG_H
