@@ -11,6 +11,7 @@
         "NDOF",
         "numpy",
         "PSRAM",
+        "pyserial",
         "rescan",
         "UART"
     ]

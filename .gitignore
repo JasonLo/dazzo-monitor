@@ -17,4 +17,4 @@ wheels/
 .DS_Store
 
 # Private firmware credentials
-cpp/receiver/secrets.h
+secrets.h

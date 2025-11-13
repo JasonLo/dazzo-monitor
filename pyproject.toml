@@ -5,14 +5,29 @@ description = "Ultra-lightweight BLE movement tracker for indoor pet monitoring"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "bleak>=1.1.1",
     "python-dotenv>=1.2.1",
     "numpy>=1.26",
-    "altair>=5.5.0",
-    "ipykernel>=7.1.0",
-    "pandas>=2.3.3",
     "httpx>=0.28.1",
     "pyserial>=3.5",
 ]
 
 license = { text = "CC0-1.0" }
+
+[project.scripts]
+dazzo-monitor = "server.main:main"
+
+[project.optional-dependencies]
+notebooks = [
+    "altair>=5.5.0",
+    "pandas>=2.3.3",
+    "ipykernel>=7.1.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.9,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+# Flat layout with code under the "server" directory
+module-root = ""
+module-name = "server"
