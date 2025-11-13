@@ -1,7 +1,7 @@
 
 # Dazzo Monitor
 
-Ultra-lightweight BLE movement tracker for indoor pet monitoring.
+Ultra-lightweight ESP-NOW movement tracker for indoor pet monitoring.
 
 [![CC0 1.0 Universal](https://img.shields.io/badge/License-CC0%201.0-lightgrey.svg)](https://creativecommons.org/publicdomain/zero/1.0/)
 
@@ -9,64 +9,82 @@ This project is dedicated to the public domain under the [CC0 1.0 Universal lice
 
 ![receiver](img/receiver.jpg)
 
+## System Architecture
+
+The system consists of three components:
+
+1. **Transmitter** - Battery-powered motion sensor (QT Py ESP32-S3)
+2. **Receiver** - USB-connected display device (ESP32-S3 Feather Reverse TFT)
+3. **Server** - Data processing and storage (Mac with InfluxDB)
+
+Data flows via ESP-NOW from transmitter to receiver, then via USB serial to the server for storage and analysis.
+
 ## Transmitter
 
 ### Hardware
 
-- [Adafruit QT Py S3](https://www.adafruit.com/product/5700) - WiFi Dev Board
+- [Adafruit QT Py ESP32-S3](https://www.adafruit.com/product/5700) - WiFi Dev Board
 - [Adafruit BNO055 + BMP280 BFF](https://www.adafruit.com/product/5937) - Motion & Pressure Sensor
 - [100mAh LiPo Battery](https://www.adafruit.com/product/1570)
 - Headers & connectors: [Female](https://www.adafruit.com/product/2940), [Male](https://www.adafruit.com/product/3002), [JST Cable](https://www.adafruit.com/product/3814)
 
 ### Setup
 
-1. Install [CircuitPython](https://circuitpython.org/board/adafruit_qtpy_esp32s3_4mbflash_2mbpsram/) on the QT Py
-2. Copy [`transmitter/`](transmitter) code to the device
-3. (Optional) Update libraries from [circuitpython.org/libraries](https://circuitpython.org/libraries)
+1. Open [`transmitter/transmitter.ino`](transmitter/transmitter.ino) in Arduino IDE
+2. Update the `peerAddress` MAC address to match your receiver
+3. Upload to the QT Py ESP32-S3
+4. The transmitter will send motion data via ESP-NOW when movement exceeds threshold
 
 ## Receiver
 
-Python service that receives BLE telemetry data via Nordic UART. No power or compute limit.
+### Hardware
+
+- [Adafruit ESP32-S3 Feather Reverse TFT](https://www.adafruit.com/product/5691) - ESP32 with built-in display
+
+### Setup
+
+1. Open [`receiver/receiver.ino`](receiver/receiver.ino) in Arduino IDE
+2. (Optional) Create `secrets.h` to customize `SENSOR_NAME`
+3. Upload to the ESP32-S3 Feather
+4. Open Serial Monitor (115200 baud) - the MAC address will be printed at startup
+5. Note the receiver's MAC address (format: `B8:F8:62:D5:D1:D0`) for transmitter configuration
+6. Connect via USB to your Mac running the server
+7. The receiver displays motion data on the TFT and streams JSON via USB serial
+
+## Server
+
+Python service that reads sensor data from the receiver via USB serial and pushes to InfluxDB for storage and visualization.
 
 ### Usage
 
-**Requirements:** Python 3.12+
+Install `uv`
 
 ```bash
-# Install dependencies
-uv sync
-
-# Run receiver
-cd receiver
-uv run main.py
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-### Optional: Self-hosted InfluxDB integration
+Run server
 
-This project can stream activity summaries to InfluxDB (v2) using the HTTP API. A Docker Compose service is provided for local development.
+```bash
+# Run server (auto-detects ESP32 receiver)
+uv run server/main.py
+```
 
-1. Start InfluxDB locally (optional):
+### InfluxDB Integration
+
+The server requires InfluxDB for data storage. A Docker Compose service is provided for local deployment.
+
+1. Start InfluxDB:
 
     ```bash
     docker compose up -d influxdb
     ```
 
-2. Configure the following environment variables (for example in a local `.env` file):
+2. Configure environment variables (e.g., in a local `.env` file):
 
+    - `INFLUXDB_TOKEN` (required for writes)
     - `INFLUXDB_URL` (default: `http://localhost:8086`)
     - `INFLUXDB_ORG` (default: `home`)
     - `INFLUXDB_BUCKET` (default: `dazzo`)
-    - `INFLUXDB_TOKEN` (required for writes)
 
-    When `INFLUXDB_TOKEN` is set, the receiver will automatically push each activity report to InfluxDB.
-
-### Optional: Adafruit IO integration
-
-You can stream activity summaries to [Adafruit IO](https://io.adafruit.com/) for easy cloud dashboards and automations.
-
-1. Create a free Adafruit IO account and generate an **AIO Key**.
-2. Create a group called `dazzo` (or use your preferred group name).
-3. Add the following environment variables (e.g., in a local `.env` file):
-    - `ADAFRUIT_IO_USERNAME` (your Adafruit IO username)
-    - `ADAFRUIT_IO_KEY` (your Adafruit IO key)
-4. When both variables are set, the receiver will push activity reports to Adafruit IO. Each activity (e.g., `resting`, `active`, etc.) is sent as a feed in the group.
+3. The server will automatically push sensor data to InfluxDB when `INFLUXDB_TOKEN` is set

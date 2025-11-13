@@ -13,6 +13,7 @@
         "PSRAM",
         "pyserial",
         "rescan",
-        "UART"
+        "UART",
+        "usbmodem"
     ]
 }

@@ -3,6 +3,7 @@
 #include <Adafruit_ST7789.h>
 #include <SPI.h>
 #include <WiFi.h>
+#include <esp_wifi.h>
 
 // Load sensor name from secrets.h if present
 #if defined(__has_include)
@@ -31,6 +32,21 @@ SensorData latestData;
 // Volatile flag to indicate new data is ready (for display updates)
 volatile bool newDataAvailable = false;
 
+// Receiver MAC address (printed and shown on TFT)
+String macAddress;
+
+// Helper to fetch STA MAC using ESP-IDF (more reliable than WiFi.macAddress())
+String getStaMac() {
+  uint8_t mac[6] = {0};
+  if (esp_wifi_get_mac(WIFI_IF_STA, mac) == ESP_OK) {
+    char buf[18];
+    snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    return String(buf);
+  }
+  return String("00:00:00:00:00:00");
+}
+
 
 // --- ESP-NOW Receive Callback ---
 // Kept fast: just copies data and sets a flag.
@@ -52,9 +68,14 @@ void updateDisplay() {
   // Set cursor to the top-left
   tft.setCursor(0, 0);
 
-  // Print formatted data. The padding (%7.2f)
+  // Always show MAC on the first line (smaller text to fit width)
+  tft.setTextSize(2);
+  tft.printf("MAC Address:\n%s\n\n", macAddress.c_str());
+
+  // Show sensor values on lines 3-5. The padding (%5.2f)
   // automatically overwrites old values.
-  tft.printf("X: %7.2f\nY: %7.2f\nZ: %7.2f",
+  tft.setTextSize(3);
+  tft.printf("X: %5.2f\nY: %5.2f\nZ: %5.2f",
              latestData.x,
              latestData.y,
              latestData.z);
@@ -83,6 +104,11 @@ void setup() {
 
   // Initialize Wi-Fi in station mode (required for ESP-NOW)
   WiFi.mode(WIFI_STA);
+
+  // Capture and print MAC address for transmitter configuration
+  macAddress = getStaMac();
+  Serial.print("Receiver MAC Address: ");
+  Serial.println(macAddress);
 
   // Initialize ESP-NOW
   if (esp_now_init() != ESP_OK) {
