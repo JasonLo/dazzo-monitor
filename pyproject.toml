@@ -12,6 +12,7 @@ dependencies = [
     "ipykernel>=7.1.0",
     "pandas>=2.3.3",
     "httpx>=0.28.1",
+    "pyserial>=3.5",
 ]
 
 license = { text = "CC0-1.0" }
